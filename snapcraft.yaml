@@ -1,0 +1,22 @@
+name: rtos-uplink
+version: "0.1"
+summary: A module for fetching OTA updated for RTOS devices 
+description: |
+  rtos-uplink is a service that fetches OTA updates using Canonical
+  Telemetry and delivers them to the RTOS OTA server. 
+base: core22
+confinement: devmode
+
+parts:
+  rtos-use-case:
+    plugin: rust
+    source: .
+    build-packages:
+      - pkg-config
+      - libssl-dev
+    build-snaps:
+      - cmake
+
+apps:
+  rtos-uplink:
+    command: bin/rtos-use-case
