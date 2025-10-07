@@ -1,5 +1,5 @@
 name: rtos-uplink
-version: "0.1"
+version: "0.1.1"
 summary: A module for fetching OTA updated for RTOS devices 
 description: |
   rtos-uplink is a service that fetches OTA updates using Canonical
