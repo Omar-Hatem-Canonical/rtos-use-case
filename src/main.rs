@@ -37,8 +37,17 @@
  *    Frank Pagliughi - initial implementation and documentation
  *******************************************************************************/
 
-use paho_mqtt as mqtt;
-use std::{env, thread, time::Duration};
+#[macro_use]
+extern crate paho_mqtt as mqtt;
+
+use std::{env, process, thread, time::Duration};
+
+const QOS: i32 = 1;
+
+const REQ_TOPIC: &str = "images/request";
+const REPLY_TOPIC: &str = "images/response";
+const CORR_ID: &[u8; 1] = b"1";
+
 
 // --------------------------------------------------------------------------
 // Handlers for different types of incoming messages based on their
@@ -47,10 +56,65 @@ use std::{env, thread, time::Duration};
 // Handler for data messages (i.e. topic "data/#")
 // Subscription ID: 1
 fn data_handler(msg: mqtt::Message) -> bool {
+    use std::io::{self, Write};
+
     println!("{}", msg);
+
+  
+    print!("Do you want to download this image? (y/n): ");
+    io::stdout().flush().unwrap();
+
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer).unwrap();
+
+    if answer.trim().eq_ignore_ascii_case("y") {
+        println!("Request for image download has been sent.");
+
+        // Create a message and publish it
+        let msg = mqtt::MessageBuilder::new()
+            .topic(REQ_TOPIC)
+            .payload(msg.payload())
+            .qos(QOS)
+            .properties(mqtt::properties![
+                mqtt::PropertyCode::ResponseTopic => REPLY_TOPIC,
+                mqtt::PropertyCode::CorrelationData => CORR_ID,
+            ])
+            .finalize();
+
+        let tok = cli.publish(msg);
+
+        if let Err(e) = tok.wait() {
+            eprintln!("Error sending message: {:?}", e);
+            cli.disconnect(None).wait().unwrap();
+            process::exit(2);
+        }
+
+        // Wait for the reply and check the Correlation ID
+        // Since we only sent one request, this should certainly be our reply!
+
+        if let Some(msg) = rx.recv().unwrap() {
+            let reply_corr_id = msg
+                .properties()
+                .get_binary(mqtt::PropertyCode::CorrelationData)
+                .unwrap();
+
+            if reply_corr_id == CORR_ID {
+                let ret: f64 = serde_json::from_str(&msg.payload_str()).unwrap();
+                println!("{}", ret);
+            }
+            else {
+                eprintln!("Unknown response for {:?}", reply_corr_id);
+            }
+        }
+        else {
+            eprintln!("Error receiving reply.");
+        }
+    } else {
+        println!("Image not downloaded.");
+    }
+
     true
 }
-
 // Handler for command messages (i.e. topic "command")
 // Return false to exit the application
 // Subscription ID: 2
@@ -99,6 +163,7 @@ fn main() -> mqtt::Result<()> {
     // Initialize the logger from the environment
     env_logger::init();
 
+
     let host = env::args()
         .nth(1)
         .unwrap_or_else(|| "mqtt://localhost:1885".to_string());
@@ -136,6 +201,9 @@ fn main() -> mqtt::Result<()> {
     // A table of dispatch function for incoming messages by Subscription ID.
     // (actually sub_id-1 since we can't use zero for a subscription ID)
     let handler: Vec<fn(mqtt::Message) -> bool> = vec![data_handler, command_handler];
+
+
+    cli.subscribe(&REPLY_TOPIC, QOS)?;
 
     // Make the connection to the broker
     let rsp = cli.connect(conn_opts)?;
